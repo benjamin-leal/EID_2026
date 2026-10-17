@@ -1,5 +1,6 @@
-import pygame
+import math
 import random
+import pygame
 
 ANCHO = 800
 ALTO = 600
@@ -11,6 +12,45 @@ AZUL = (80, 160, 255)
 ROJO = (230, 70, 70)
 VERDE = (90, 220, 120)
 AMARILLO = (250, 220, 80)
+GRIS = (50, 50, 60)
+CIAN = (0, 220, 255)
+
+BRILLOS = {}
+
+
+def atenuar(color, factor):
+    return (int(color[0] * factor), int(color[1] * factor), int(color[2] * factor))
+
+
+def obtener_brillo(color, radio):
+    clave = (color, radio)
+    if clave not in BRILLOS:
+        superficie = pygame.Surface((radio * 2, radio * 2))
+        for r in range(radio, 0, -1):
+            factor = (1 - r / radio) ** 2 * 0.7
+            pygame.draw.circle(superficie, atenuar(color, factor), (radio, radio), r)
+        BRILLOS[clave] = superficie
+    return BRILLOS[clave]
+
+
+class Estrella:
+    CAPAS = [(1, 0.5, 70), (1, 1.0, 110), (2, 1.8, 170)]
+
+    def __init__(self):
+        self.x = random.randint(0, ANCHO)
+        self.y = random.randint(0, ALTO)
+        self.tamano, self.velocidad, nivel = random.choice(self.CAPAS)
+        self.color = (nivel, nivel, min(255, nivel + 30))
+
+    def actualizar(self):
+        self.y += self.velocidad
+        if self.y > ALTO:
+            self.y = 0
+            self.x = random.randint(0, ANCHO)
+
+    def dibujar(self, pantalla):
+        forma = (int(self.x), int(self.y), self.tamano, self.tamano)
+        pygame.draw.rect(pantalla, self.color, forma)
 
 
 class Nave:
@@ -20,37 +60,76 @@ class Nave:
         self.rect = pygame.Rect(0, 0, self.ancho, self.alto)
         self.rect.midbottom = (ANCHO // 2, ALTO - 20)
         self.velocidad = 5
-        self.vida = 10
+        self.vida_max = 10
+        self.vida = self.vida_max
+        self.ultimo_golpe = -1000
+        self.inmunidad = 1000
+        self.retroceso = 0
+        self.fuerza = 12
+        self.dir_x = 0.0
+        self.dir_y = 0.0
 
     def mover(self, teclas):
-        if teclas[pygame.K_LEFT]:
-            self.rect.x -= self.velocidad
-        if teclas[pygame.K_RIGHT]:
-            self.rect.x += self.velocidad
-        if teclas[pygame.K_UP]:
-            self.rect.y -= self.velocidad
-        if teclas[pygame.K_DOWN]:
-            self.rect.y += self.velocidad
+        if self.retroceso > 0:
+            self.rect.x += round(self.dir_x * self.fuerza)
+            self.rect.y += round(self.dir_y * self.fuerza)
+            self.retroceso -= 1
+        else:
+            if teclas[pygame.K_LEFT]:
+                self.rect.x -= self.velocidad
+            if teclas[pygame.K_RIGHT]:
+                self.rect.x += self.velocidad
+            if teclas[pygame.K_UP]:
+                self.rect.y -= self.velocidad
+            if teclas[pygame.K_DOWN]:
+                self.rect.y += self.velocidad
         self.rect.clamp_ip(pygame.Rect(0, 0, ANCHO, ALTO))
+
+    def recibir_golpe(self, rect_enemigo, ahora):
+        dx = self.rect.centerx - rect_enemigo.centerx
+        dy = self.rect.centery - rect_enemigo.centery
+        distancia = math.hypot(dx, dy)
+        if distancia == 0:
+            dx = 0
+            dy = 1
+            distancia = 1
+        self.dir_x = dx / distancia
+        self.dir_y = dy / distancia
+        self.retroceso = 10
+        self.vida -= 1
+        self.ultimo_golpe = ahora
 
     def dibujar(self, pantalla):
         pygame.draw.rect(pantalla, AZUL, self.rect)
 
 
 class Bala:
-    def __init__(self, x, y):
+    def __init__(self, x, y, color=CIAN):
         self.rect = pygame.Rect(0, 0, 6, 14)
         self.rect.midbottom = (x, y)
         self.velocidad = 9
+        self.color = color
+        self.estela = []
 
     def actualizar(self):
+        self.estela.append(self.rect.center)
+        if len(self.estela) > 6:
+            self.estela.pop(0)
         self.rect.y -= self.velocidad
 
     def fuera(self):
         return self.rect.bottom < 0
 
     def dibujar(self, pantalla):
-        pygame.draw.rect(pantalla, AMARILLO, self.rect)
+        total = len(self.estela)
+        for i, posicion in enumerate(self.estela):
+            tono = atenuar(self.color, (i + 1) / (total + 1))
+            pygame.draw.circle(pantalla, tono, posicion, max(1, i // 2))
+        brillo = obtener_brillo(self.color, 18)
+        zona = brillo.get_rect(center=self.rect.center)
+        pantalla.blit(brillo, zona, special_flags=pygame.BLEND_RGB_ADD)
+        pygame.draw.ellipse(pantalla, self.color, self.rect)
+        pygame.draw.ellipse(pantalla, BLANCO, self.rect.inflate(-3, -6))
 
 
 class Enemigo:
@@ -73,10 +152,12 @@ class Enemigo:
 class Juego:
     def __init__(self):
         pygame.init()
-        self.pantalla = pygame.display.set_mode((ANCHO, ALTO))
+        self.ventana = pygame.display.set_mode((ANCHO, ALTO))
+        self.pantalla = pygame.Surface((ANCHO, ALTO))
         pygame.display.set_caption("Juego Arcade")
         self.reloj = pygame.time.Clock()
         self.fuente = pygame.font.SysFont(None, 28)
+        self.estrellas = [Estrella() for _ in range(90)]
         self.reiniciar()
 
     def reiniciar(self):
@@ -86,6 +167,8 @@ class Juego:
         self.ultimo_disparo = 0
         self.cadencia = 250
         self.terminado = False
+        self.temblor = 0
+        self.intensidad = 0
         self.crear_enemigos(4)
 
     def crear_enemigos(self, cantidad):
@@ -93,6 +176,18 @@ class Juego:
             x = random.randint(40, ANCHO - 40)
             y = 60 + i * 50
             self.enemigos.append(Enemigo(x, y))
+
+    def activar_temblor(self, frames, intensidad):
+        self.temblor = max(self.temblor, frames)
+        self.intensidad = max(self.intensidad, intensidad)
+
+    def desplazamiento(self):
+        if self.temblor <= 0:
+            return (0, 0)
+        return (
+            random.randint(-self.intensidad, self.intensidad),
+            random.randint(-self.intensidad, self.intensidad),
+        )
 
     def eventos(self):
         for evento in pygame.event.get():
@@ -110,8 +205,16 @@ class Juego:
         if teclas[pygame.K_SPACE] and ahora - self.ultimo_disparo >= self.cadencia:
             self.balas.append(Bala(self.nave.rect.centerx, self.nave.rect.top))
             self.ultimo_disparo = ahora
+            self.activar_temblor(2, 1)
 
     def actualizar(self):
+        for estrella in self.estrellas:
+            estrella.actualizar()
+        if self.temblor > 0:
+            self.temblor -= 1
+        else:
+            self.intensidad = 0
+
         if self.terminado:
             return
         teclas = pygame.key.get_pressed()
@@ -122,9 +225,6 @@ class Juego:
             bala.actualizar()
         self.balas = [b for b in self.balas if not b.fuera()]
 
-        for enemigo in self.enemigos:
-            enemigo.actualizar()
-
         for bala in self.balas[:]:
             for enemigo in self.enemigos[:]:
                 if bala.rect.colliderect(enemigo.rect):
@@ -134,10 +234,15 @@ class Juego:
                         self.enemigos.remove(enemigo)
                     break
 
-        for enemigo in self.enemigos[:]:
-            if enemigo.rect.colliderect(self.nave.rect):
-                self.enemigos.remove(enemigo)
-                self.nave.vida -= 1
+        ahora = pygame.time.get_ticks()
+        for enemigo in self.enemigos:
+            enemigo.actualizar()
+            if (
+                enemigo.rect.colliderect(self.nave.rect)
+                and ahora - self.nave.ultimo_golpe >= self.nave.inmunidad
+            ):
+                self.nave.recibir_golpe(enemigo.rect, ahora)
+                self.activar_temblor(12, 5)
 
         if self.nave.vida <= 0:
             self.terminado = True
@@ -146,16 +251,33 @@ class Juego:
         imagen = self.fuente.render(texto, True, color)
         self.pantalla.blit(imagen, (x, y))
 
+    def dibujar_barra_vida(self):
+        ancho_max = 200
+        alto = 16
+        margen = 5
+        x = margen
+        y = ALTO - alto - margen
+        proporcion = max(self.nave.vida, 0) / self.nave.vida_max
+        relleno = int(ancho_max * proporcion)
+        pygame.draw.rect(self.pantalla, GRIS, (x, y, ancho_max, alto))
+        pygame.draw.rect(self.pantalla, VERDE, (x, y, relleno, alto))
+        pygame.draw.rect(self.pantalla, BLANCO, (x, y, ancho_max, alto), 1)
+
     def dibujar(self):
         self.pantalla.fill(NEGRO)
+        for estrella in self.estrellas:
+            estrella.dibujar(self.pantalla)
         self.nave.dibujar(self.pantalla)
         for bala in self.balas:
             bala.dibujar(self.pantalla)
         for enemigo in self.enemigos:
             enemigo.dibujar(self.pantalla)
-        self.dibujar_texto("Vida: " + str(self.nave.vida), 10, 10, VERDE)
+        self.dibujar_barra_vida()
         if self.terminado:
-            self.dibujar_texto("GAME OVER - R para reiniciar", ANCHO // 2 - 140, ALTO // 2)
+            mensaje = "GAME OVER - R para reiniciar"
+            self.dibujar_texto(mensaje, ANCHO // 2 - 140, ALTO // 2)
+        self.ventana.fill(NEGRO)
+        self.ventana.blit(self.pantalla, self.desplazamiento())
         pygame.display.flip()
 
     def correr(self):
