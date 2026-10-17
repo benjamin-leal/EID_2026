@@ -15,6 +15,8 @@ AMARILLO = (250, 220, 80)
 GRIS = (50, 50, 60)
 CIAN = (0, 220, 255)
 
+FINALES = ("Victoria","Game Over")
+
 BRILLOS = {}
 
 
@@ -157,8 +159,10 @@ class Juego:
         pygame.display.set_caption("Juego Arcade")
         self.reloj = pygame.time.Clock()
         self.fuente = pygame.font.SysFont(None, 28)
+        self.fuente_titulo = pygame.font.SysFont(None, 72)
         self.estrellas = [Estrella() for _ in range(90)]
         self.reiniciar()
+        self.estado = "Inicio"
 
     def reiniciar(self):
         self.nave = Nave()
@@ -166,7 +170,7 @@ class Juego:
         self.enemigos = []
         self.ultimo_disparo = 0
         self.cadencia = 250
-        self.terminado = False
+        self.estado = "Jugando"
         self.temblor = 0
         self.intensidad = 0
         self.crear_enemigos(4)
@@ -196,7 +200,9 @@ class Juego:
             if evento.type == pygame.KEYDOWN:
                 if evento.key == pygame.K_ESCAPE:
                     return False
-                if evento.key == pygame.K_r and self.terminado:
+                if evento.key == pygame.K_RETURN and self.estado == "Inicio":
+                    self.estado = "Jugando"
+                if evento.key == pygame.K_r and self.estado in FINALES:
                     self.reiniciar()
         return True
 
@@ -215,7 +221,7 @@ class Juego:
         else:
             self.intensidad = 0
 
-        if self.terminado:
+        if self.estado != "Jugando":
             return
         teclas = pygame.key.get_pressed()
         self.nave.mover(teclas)
@@ -245,7 +251,9 @@ class Juego:
                 self.activar_temblor(12, 5)
 
         if self.nave.vida <= 0:
-            self.terminado = True
+            self.estado = "Game Over"
+        elif not self.enemigos:
+            self.estado = "Victoria"
 
     def dibujar_texto(self, texto, x, y, color=BLANCO):
         imagen = self.fuente.render(texto, True, color)
@@ -263,6 +271,27 @@ class Juego:
         pygame.draw.rect(self.pantalla, VERDE, (x, y, relleno, alto))
         pygame.draw.rect(self.pantalla, BLANCO, (x, y, ancho_max, alto), 1)
 
+    def dibujar_centrado(self, texto, y, color=BLANCO, fuente=None):
+        imagen = (fuente or self.fuente).render(texto, True, color)
+        x = ANCHO // 2 - imagen.get_width() // 2
+        self.pantalla.blit(imagen, (x, y))
+
+    def dibujar_pantalla_estado(self):
+        if self.estado == "Jugando":
+            return
+        velo = pygame.Surface((ANCHO, ALTO))
+        velo.set_alpha(150)
+        velo.fill(NEGRO)
+        self.pantalla.blit(velo, (0, 0))
+        if self.estado == "Inicio":
+            titulo, color, ayuda = "JUEGO ARCADE", CIAN, "ENTER para empezar"
+        elif self.estado == "Victoria":
+            titulo, color, ayuda = "VICTORIA", VERDE, "R para jugar de nuevo"
+        else:
+            titulo, color, ayuda = "Game Over", ROJO, "R para reiniciar"
+        self.dibujar_centrado(titulo, ALTO // 2 - 50, color, self.fuente_titulo)
+        self.dibujar_centrado(ayuda, ALTO // 2 + 10)
+
     def dibujar(self):
         self.pantalla.fill(NEGRO)
         for estrella in self.estrellas:
@@ -273,9 +302,7 @@ class Juego:
         for enemigo in self.enemigos:
             enemigo.dibujar(self.pantalla)
         self.dibujar_barra_vida()
-        if self.terminado:
-            mensaje = "GAME OVER - R para reiniciar"
-            self.dibujar_texto(mensaje, ANCHO // 2 - 140, ALTO // 2)
+        self.dibujar_pantalla_estado()
         self.ventana.fill(NEGRO)
         self.ventana.blit(self.pantalla, self.desplazamiento())
         pygame.display.flip()
