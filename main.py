@@ -14,6 +14,8 @@ VERDE = (90, 220, 120)
 AMARILLO = (250, 220, 80)
 GRIS = (50, 50, 60)
 CIAN = (0, 220, 255)
+NARANJA = (255, 165, 0)
+MAGENTA = (255, 0, 255)
 
 FINALES = ("Victoria","Game Over")
 
@@ -105,33 +107,65 @@ class Nave:
         pygame.draw.rect(pantalla, AZUL, self.rect)
 
 
+
 class Bala:
-    def __init__(self, x, y, color=CIAN):
+    def __init__(self, x, y, color=CIAN, tipo="basica",
+                 vx=0, vy=-9):
+        self.x = float(x)
+        self.y = float(y)
         self.rect = pygame.Rect(0, 0, 6, 14)
-        self.rect.midbottom = (x, y)
-        self.velocidad = 9
+        self.rect.center = (x, y)
+
+        self.velocidad_x = vx
+        self.velocidad_y = vy
+        self.gravedad = 0.22
+        self.tipo = tipo
         self.color = color
         self.estela = []
 
     def actualizar(self):
         self.estela.append(self.rect.center)
+
         if len(self.estela) > 6:
             self.estela.pop(0)
-        self.rect.y -= self.velocidad
+
+        self.x += self.velocidad_x
+        self.y += self.velocidad_y
+
+        if self.tipo == "parabolica":
+            self.velocidad_y += self.gravedad
+
+        self.rect.center = (round(self.x), round(self.y))
 
     def fuera(self):
-        return self.rect.bottom < 0
+        return (
+            self.rect.bottom < 0
+            or self.rect.top > ALTO
+            or self.rect.right < 0
+            or self.rect.left > ANCHO
+        )
 
     def dibujar(self, pantalla):
         total = len(self.estela)
+
         for i, posicion in enumerate(self.estela):
-            tono = atenuar(self.color, (i + 1) / (total + 1))
-            pygame.draw.circle(pantalla, tono, posicion, max(1, i // 2))
+            tono = atenuar(
+                self.color, (i + 1) / (total + 1)
+            )
+            pygame.draw.circle(
+                pantalla, tono, posicion, max(1, i // 2)
+            )
+
         brillo = obtener_brillo(self.color, 18)
         zona = brillo.get_rect(center=self.rect.center)
-        pantalla.blit(brillo, zona, special_flags=pygame.BLEND_RGB_ADD)
+        pantalla.blit(
+            brillo, zona, special_flags=pygame.BLEND_RGB_ADD
+        )
+
         pygame.draw.ellipse(pantalla, self.color, self.rect)
-        pygame.draw.ellipse(pantalla, BLANCO, self.rect.inflate(-3, -6))
+        pygame.draw.ellipse(
+            pantalla, BLANCO, self.rect.inflate(-3, -6)
+        )
 
 
 class Enemigo:
@@ -139,7 +173,16 @@ class Enemigo:
         self.rect = pygame.Rect(0, 0, 36, 36)
         self.rect.center = (x, y)
         self.velocidad = random.choice([-2, 2])
-        self.vida = 3
+        self.vida = 6
+        self.dano_recibido = {
+            "basica": 2,
+            "parabolica": 3,
+            "conica": 6
+        }
+        self.dano = 1
+
+    def recibir_dano(self, tipo):
+        self.vida -= self.dano_recibido[tipo]
 
     def actualizar(self):
         self.rect.x += self.velocidad
@@ -170,6 +213,10 @@ class Juego:
         self.enemigos = []
         self.ultimo_disparo = 0
         self.cadencia = 250
+        self.cooldown_parabolica = 600 
+        self.cooldown_conica = 1000
+        self.municion = "basica"
+        self.nombre_municion = "Basica"
         self.estado = "Jugando"
         self.temblor = 0
         self.intensidad = 0
@@ -193,29 +240,89 @@ class Juego:
             random.randint(-self.intensidad, self.intensidad),
         )
 
+
     def eventos(self):
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
                 return False
+
             if evento.type == pygame.KEYDOWN:
                 if evento.key == pygame.K_ESCAPE:
                     return False
+
                 if evento.key == pygame.K_RETURN and self.estado == "Inicio":
                     self.estado = "Jugando"
+
                 if evento.key == pygame.K_r and self.estado in FINALES:
                     self.reiniciar()
+
+                if self.estado == "Jugando":
+                    if evento.key == pygame.K_1:
+                        self.municion = "basica"
+                        self.nombre_municion = "Basica"
+
+                    elif evento.key == pygame.K_2:
+                        self.municion = "parabolica"
+                        self.nombre_municion = "Parabolica"
+
+                    elif evento.key == pygame.K_3:
+                        self.municion = "conica"
+                        self.nombre_municion = "Conica"
+
         return True
 
+    
+    
     def disparar(self, teclas):
         ahora = pygame.time.get_ticks()
-        if teclas[pygame.K_SPACE] and ahora - self.ultimo_disparo >= self.cadencia:
-            self.balas.append(Bala(self.nave.rect.centerx, self.nave.rect.top))
+
+        if self.municion == "basica":
+            cooldown_actual = self.cadencia
+        elif self.municion == "parabolica":
+            cooldown_actual = self.cooldown_parabolica
+        else:
+            cooldown_actual = self.cooldown_conica
+
+        if (
+            teclas[pygame.K_SPACE]
+            and ahora - self.ultimo_disparo >= cooldown_actual
+        ):
+            x = self.nave.rect.centerx
+            y = self.nave.rect.top
+
+            if self.municion == "basica":
+                self.balas.append(
+                    Bala(x, y, CIAN, "basica", 0, -9)
+                )
+
+            elif self.municion == "parabolica":
+                self.balas.append(
+                    Bala(x, y, NARANJA, "parabolica", 2.5, -9)
+                )
+
+            elif self.municion == "conica":
+                angulos = [-40, -20, 0, 20, 40]
+
+                for angulo in angulos:
+                    radianes = math.radians(angulo)
+                    vx = 9 * math.sin(radianes)
+                    vy = -9 * math.cos(radianes)
+
+                    self.balas.append(
+                        Bala(
+                            x, y, MAGENTA,
+                            "conica", vx, vy
+                        )
+                    )
+
             self.ultimo_disparo = ahora
             self.activar_temblor(2, 1)
 
     def actualizar(self):
+
         for estrella in self.estrellas:
             estrella.actualizar()
+
         if self.temblor > 0:
             self.temblor -= 1
         else:
@@ -223,26 +330,32 @@ class Juego:
 
         if self.estado != "Jugando":
             return
+
         teclas = pygame.key.get_pressed()
         self.nave.mover(teclas)
         self.disparar(teclas)
 
         for bala in self.balas:
             bala.actualizar()
+
         self.balas = [b for b in self.balas if not b.fuera()]
 
         for bala in self.balas[:]:
             for enemigo in self.enemigos[:]:
+                
                 if bala.rect.colliderect(enemigo.rect):
                     self.balas.remove(bala)
-                    enemigo.vida -= 1
+                    enemigo.recibir_dano(bala.tipo)
+                    
                     if enemigo.vida <= 0:
                         self.enemigos.remove(enemigo)
-                    break
+                        break
 
         ahora = pygame.time.get_ticks()
+
         for enemigo in self.enemigos:
             enemigo.actualizar()
+
             if (
                 enemigo.rect.colliderect(self.nave.rect)
                 and ahora - self.nave.ultimo_golpe >= self.nave.inmunidad
@@ -270,6 +383,19 @@ class Juego:
         pygame.draw.rect(self.pantalla, GRIS, (x, y, ancho_max, alto))
         pygame.draw.rect(self.pantalla, VERDE, (x, y, relleno, alto))
         pygame.draw.rect(self.pantalla, BLANCO, (x, y, ancho_max, alto), 1)
+
+    def dibujar_municion(self):
+        colores = {
+            "basica": CIAN,
+            "parabolica": NARANJA,
+            "conica": MAGENTA,
+        }
+
+        color = colores[self.municion]
+        texto = f"Municion: {self.nombre_municion} (1/2/3)"
+
+        imagen = self.fuente.render(texto, True, color)
+        self.pantalla.blit(imagen, (10, 10))
 
     def dibujar_centrado(self, texto, y, color=BLANCO, fuente=None):
         imagen = (fuente or self.fuente).render(texto, True, color)
@@ -302,6 +428,7 @@ class Juego:
         for enemigo in self.enemigos:
             enemigo.dibujar(self.pantalla)
         self.dibujar_barra_vida()
+        self.dibujar_municion()
         self.dibujar_pantalla_estado()
         self.ventana.fill(NEGRO)
         self.ventana.blit(self.pantalla, self.desplazamiento())
