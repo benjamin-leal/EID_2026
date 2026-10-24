@@ -26,11 +26,13 @@ COLORES_BALA = {
     "parabolica": NARANJA,
     "circunferencia": MAGENTA,
 }
+
 NOMBRES_MUNICION = {
     "basica": "Basica",
     "parabolica": "Parabolica",
     "circunferencia": "Circunferencia",
 }
+
 COOLDOWNS = {
     "basica": 250,
     "parabolica": 700,
@@ -71,7 +73,11 @@ BRILLOS = {}
 
 
 def atenuar(color, factor):
-    return (int(color[0] * factor), int(color[1] * factor), int(color[2] * factor))
+    return (
+        int(color[0] * factor),
+        int(color[1] * factor),
+        int(color[2] * factor),
+    )
 
 
 def obtener_brillo(color, radio):
@@ -80,7 +86,12 @@ def obtener_brillo(color, radio):
         superficie = pygame.Surface((radio * 2, radio * 2))
         for r in range(radio, 0, -1):
             factor = (1 - r / radio) ** 2 * 0.7
-            pygame.draw.circle(superficie, atenuar(color, factor), (radio, radio), r)
+            pygame.draw.circle(
+                superficie,
+                atenuar(color, factor),
+                (radio, radio),
+                r,
+            )
         BRILLOS[clave] = superficie
     return BRILLOS[clave]
 
@@ -188,6 +199,7 @@ class Bala:
             self.rect = pygame.Rect(0, 0, 6, 14)
         else:
             self.rect = pygame.Rect(0, 0, 10, 10)
+
         self.rect.center = (round(x), round(y))
         self.estela = []
 
@@ -220,7 +232,6 @@ class Bala:
 
     def dibujar(self, pantalla):
         total = len(self.estela)
-
         for i, posicion in enumerate(self.estela):
             tono = atenuar(self.color, (i + 1) / (total + 1))
             pygame.draw.circle(pantalla, tono, posicion, max(1, i // 2))
@@ -256,10 +267,7 @@ class Enemigo:
         self.A = datos["A"] + (n % 4) * 3
         self.B = datos["B"] + (n % 3) * 0.002
         self.C = round(n * 0.9, 2)
-        if tipo == 4:
-            self.D = 120
-        else:
-            self.D = 110 + (n % 6) * 35
+        self.D = 120 if tipo == 4 else 110 + (n % 6) * 35
 
         self.x = float(x)
         self.rect.center = (round(self.x), round(self.f(self.x)))
@@ -270,21 +278,14 @@ class Enemigo:
     def recibir_dano(self, tipo_bala):
         self.vida -= self.dano_recibido[tipo_bala]
 
-    def actualizar_movimiento(self, lista_enemigos):
+    def actualizar_movimiento(self):
         proximo_x = self.x + self.velocidad
         proximo_y = self.f(proximo_x)
 
         prueba = self.rect.copy()
         prueba.center = (round(proximo_x), round(proximo_y))
 
-        debe_rebotar = prueba.left <= 0 or prueba.right >= ANCHO
-        if not debe_rebotar:
-            for otro in lista_enemigos:
-                if otro is not self and prueba.colliderect(otro.rect):
-                    debe_rebotar = True
-                    break
-
-        if debe_rebotar:
+        if prueba.left <= 0 or prueba.right >= ANCHO:
             self.velocidad = -self.velocidad
         else:
             self.x = proximo_x
@@ -344,7 +345,8 @@ class Enemigo:
             proporcion = max(self.vida, 0) / self.vida_max
             pygame.draw.rect(pantalla, GRIS, (r.left, r.top - 8, r.width, 4))
             pygame.draw.rect(
-                pantalla, VERDE, (r.left, r.top - 8, int(r.width * proporcion), 4)
+                pantalla, VERDE,
+                (r.left, r.top - 8, int(r.width * proporcion), 4),
             )
 
 
@@ -365,6 +367,7 @@ class Juego:
         self.nave = Nave()
         self.balas = []
         self.enemigos = []
+        Enemigo.contador = 0
         self.ultimo_disparo = {tipo: -10000 for tipo in COOLDOWNS}
         self.municion = "basica"
         self.lado_parabola = 1
@@ -454,7 +457,9 @@ class Juego:
 
         else:
             for sentido in (1, -1):
-                self.balas.append(Bala(x, y, "circunferencia", sentido))
+                self.balas.append(
+            Bala(x, y, "circunferencia", sentido)
+        )
 
         self.ultimo_disparo[self.municion] = ahora
         self.activar_temblor(2, 1)
@@ -481,21 +486,26 @@ class Juego:
         for bala in self.balas:
             bala.actualizar()
 
-        self.balas = [b for b in self.balas if not b.fuera()]
+        self.balas = [bala for bala in self.balas if not bala.fuera()]
 
         for bala in self.balas[:]:
+            impacto = None
             for enemigo in self.enemigos:
                 if bala.rect.colliderect(enemigo.rect):
-                    enemigo.recibir_dano(bala.tipo)
-                    self.balas.remove(bala)
-                    if enemigo.vida <= 0:
-                        self.enemigos.remove(enemigo)
+                    impacto = enemigo
                     break
+
+            if impacto is not None:
+                impacto.recibir_dano(bala.tipo)
+                if bala in self.balas:
+                    self.balas.remove(bala)
+                if impacto.vida <= 0 and impacto in self.enemigos:
+                    self.enemigos.remove(impacto)
 
         ahora = pygame.time.get_ticks()
 
         for enemigo in self.enemigos:
-            enemigo.actualizar_movimiento(self.enemigos)
+            enemigo.actualizar_movimiento()
 
             if (
                 enemigo.rect.colliderect(self.nave.rect)
@@ -529,15 +539,20 @@ class Juego:
         for enemigo in self.enemigos:
             if enemigo.tipo == 4:
                 jefe = enemigo
+                break
         if jefe is None:
             return
+
         ancho_max = 250
         alto = 16
         x = ANCHO - ancho_max - 5
         y = ALTO - alto - 5
         proporcion = max(jefe.vida, 0) / jefe.vida_max
         pygame.draw.rect(self.pantalla, GRIS, (x, y, ancho_max, alto))
-        pygame.draw.rect(self.pantalla, ROJO, (x, y, int(ancho_max * proporcion), alto))
+        pygame.draw.rect(
+            self.pantalla, ROJO,
+            (x, y, int(ancho_max * proporcion), alto),
+        )
         pygame.draw.rect(self.pantalla, BLANCO, (x, y, ancho_max, alto), 1)
         etiqueta = self.fuente.render("JEFE", True, BLANCO)
         self.pantalla.blit(etiqueta, (x - 55, y - 2))
@@ -553,7 +568,9 @@ class Juego:
         self.pantalla.blit(self.fuente.render(texto, True, color), (10, 10))
 
         ahora = pygame.time.get_ticks()
-        espera = COOLDOWNS[self.municion] - (ahora - self.ultimo_disparo[self.municion])
+        espera = COOLDOWNS[self.municion] - (
+            ahora - self.ultimo_disparo[self.municion]
+        )
         if espera <= 0:
             estado = "Recarga: lista"
         else:
