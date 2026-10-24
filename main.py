@@ -554,8 +554,8 @@ class Juego:
             (x, y, int(ancho_max * proporcion), alto),
         )
         pygame.draw.rect(self.pantalla, BLANCO, (x, y, ancho_max, alto), 1)
-        etiqueta = self.fuente.render("JEFE", True, BLANCO)
-        self.pantalla.blit(etiqueta, (x - 55, y - 2))
+        etiqueta = self.fuente.render("HexaBoss", True, BLANCO)
+        self.pantalla.blit(etiqueta, (x - 100, y - 2))
 
     def dibujar_municion(self):
         color = COLORES_BALA[self.municion]
